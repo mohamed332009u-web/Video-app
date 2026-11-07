@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIDORA</title>
+<style>
+:root {
+  --bg: #090e1a;
+  --card: #131c2e;
+  --input-bg: #0b1322;
+  --border: #23324a;
+  --accent: #38bdf8;
+  --text: #f1f5f9;
+  --muted: #94a3b8;
+  --green: #22c55e;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, Tahoma, sans-serif; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.wrap { width: 100%; max-width: 440px; }
+header { text-align: center; margin-bottom: 24px; }
+.logo { font-size: 38px; font-weight: 900; letter-spacing: 2px; color: var(--accent); }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 24px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+}
+.card-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; text-align: center; }
+label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 8px; }
+input {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: #fff;
+  font-size: 15px;
+  outline: none;
+}
+input:focus { border-color: var(--accent); }
+.mode-toggle {
+  display: flex;
+  background: var(--input-bg);
+  padding: 5px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  gap: 6px;
+}
+.mode-btn {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.mode-btn.active {
+  background: var(--accent);
+  color: #041324;
+}
+.btn-start {
+  width: 100%;
+  border: none;
+  border-radius: 14px;
+  padding: 15px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--accent);
+  color: #041324;
+  margin-top: 22px;
+}
+.btn-start:disabled { opacity: .5; }
+.status {
+  display: none;
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+.bar { height: 8px; background: #1e293b; border-radius: 10px; overflow: hidden; margin: 10px 0; }
+.fill { height: 100%; width: 0%; background: var(--green); transition: width .3s; }
+.error { color: #f87171; }
+.success { color: #4ade80; }
+footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 20px; opacity: 0.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><div class="logo">VIDORA</div></header>
+  <section class="card">
+    <div class="card-title">تنزيل فيديو أو صوت</div>
+    <label for="url">رابط المحتوى</label>
+    <input id="url" type="url" placeholder="الصق الرابط هنا...">
+    <label>صيغة التنزيل</label>
+    <div class="mode-toggle">
+      <button type="button" class="mode-btn active" id="btnVideo" onclick="selectMode('video')">🎬 فيديو MP4</button>
+      <button type="button" class="mode-btn" id="btnAudio" onclick="selectMode('audio')">🎵 صوت MP3</button>
+    </div>
+    <input type="hidden" id="mode" value="video">
+    <button class="btn-start" id="start" onclick="startJob()">⬇ ابدأ التحميل</button>
+    <div class="status" id="status">
+      <div id="statusText">جاري التجهيز...</div>
+      <div class="bar"><div class="fill" id="fill"></div></div>
+      <div id="percent" style="font-size: 12px; color: var(--muted);">0%</div>
+    </div>
+  </section>
+  <footer>VIDORA • تطبيق الهاتف</footer>
+</div>
+<script>
+const API_BASE = 'http://127.0.0.1:8080';
+let currentJob = null, pollTimer = null;
+const $ = id => document.getElementById(id);
+
+function selectMode(m) {
+  $('mode').value = m;
+  $('btnVideo').classList.toggle('active', m === 'video');
+  $('btnAudio').classList.toggle('active', m === 'audio');
+}
+
+function showError(msg) {
+  $('status').style.display = 'block';
+  $('statusText').className = 'error';
+  $('statusText').textContent = msg;
+}
+
+async function startJob() {
+  const url = $('url').value.trim(), mode = $('mode').value;
+  if (!url) { alert('يرجى لصق الرابط أولاً'); return; }
+  $('start').disabled = true;
+  $('status').style.display = 'block';
+  $('statusText').className = '';
+  $('statusText').textContent = 'جاري الاتصال...';
+  $('fill').style.width = '0%';
+  $('percent').textContent = '0%';
+
+  try {
+    const res = await fetch(API_BASE + '/api/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, mode, quality: 'best' })
+    });
+    const d = await res.json();
+    if (!d.success) throw new Error(d.message || 'تعذر بدء العملية');
+    currentJob = d.job_id;
+    poll();
+  } catch(e) {
+    showError('تأكد من تشغيل خادم Vidora في Pydroid أولاً.');
+    $('start').disabled = false;
+  }
+}
+
+async function poll() {
+  if (!currentJob) return;
+  try {
+    const res = await fetch(API_BASE + '/api/status?id=' + encodeURIComponent(currentJob));
+    const d = await res.json();
+    $('statusText').className = d.state === 'error' ? 'error' : (d.state === 'done' ? 'success' : '');
+    $('statusText').textContent = d.message || 'جاري العمل...';
+    const p = Math.max(0, Math.min(100, Number(d.progress) || 0));
+    $('fill').style.width = p + '%';
+    $('percent').textContent = p.toFixed(1) + '%';
+
+    if (d.state === 'done') {
+      $('url').value = '';
+      window.location.href = API_BASE + '/api/file?id=' + encodeURIComponent(currentJob);
+      $('start').disabled = false;
+      currentJob = null;
+      return;
+    }
+    if (d.state === 'error') {
+      $('start').disabled = false;
+      currentJob = null;
+      return;
+    }
+  } catch(e) {
+    $('statusText').textContent = 'انقطع الاتصال بالسيرفر';
+  }
+  pollTimer = setTimeout(poll, 1000);
+}
+</script>
+</body>
+</html>

@@ -1,199 +1,166 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VIDORA</title>
-<style>
-:root {
-  --bg: #090e1a;
-  --card: #131c2e;
-  --input-bg: #0b1322;
-  --border: #23324a;
-  --accent: #38bdf8;
-  --text: #f1f5f9;
-  --muted: #94a3b8;
-  --green: #22c55e;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, Tahoma, sans-serif; }
-body {
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-}
-.wrap { width: 100%; max-width: 440px; }
-header { text-align: center; margin-bottom: 24px; }
-.logo { font-size: 38px; font-weight: 900; letter-spacing: 2px; color: var(--accent); }
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 24px;
-  padding: 24px;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
-}
-.card-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; text-align: center; }
-label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 8px; }
-input {
-  width: 100%;
-  padding: 14px 16px;
-  border-radius: 14px;
-  border: 1px solid var(--border);
-  background: var(--input-bg);
-  color: #fff;
-  font-size: 15px;
-  outline: none;
-}
-input:focus { border-color: var(--accent); }
-.mode-toggle {
-  display: flex;
-  background: var(--input-bg);
-  padding: 5px;
-  border-radius: 14px;
-  border: 1px solid var(--border);
-  gap: 6px;
-}
-.mode-btn {
-  flex: 1;
-  padding: 12px;
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.mode-btn.active {
-  background: var(--accent);
-  color: #041324;
-}
-.btn-start {
-  width: 100%;
-  border: none;
-  border-radius: 14px;
-  padding: 15px;
-  font-size: 16px;
-  font-weight: 700;
-  cursor: pointer;
-  background: var(--accent);
-  color: #041324;
-  margin-top: 22px;
-}
-.btn-start:disabled { opacity: .5; }
-.status {
-  display: none;
-  margin-top: 18px;
-  padding: 14px;
-  border-radius: 14px;
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  text-align: center;
-}
-.bar { height: 8px; background: #1e293b; border-radius: 10px; overflow: hidden; margin: 10px 0; }
-.fill { height: 100%; width: 0%; background: var(--green); transition: width .3s; }
-.error { color: #f87171; }
-.success { color: #4ade80; }
-footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 20px; opacity: 0.7; }
-</style>
-</head>
-<body>
-<div class="wrap">
-  <header><div class="logo">VIDORA</div></header>
-  <section class="card">
-    <div class="card-title">تنزيل فيديو أو صوت</div>
-    <label for="url">رابط المحتوى</label>
-    <input id="url" type="url" placeholder="الصق الرابط هنا...">
-    <label>صيغة التنزيل</label>
-    <div class="mode-toggle">
-      <button type="button" class="mode-btn active" id="btnVideo" onclick="selectMode('video')">🎬 فيديو MP4</button>
-      <button type="button" class="mode-btn" id="btnAudio" onclick="selectMode('audio')">🎵 صوت MP3</button>
-    </div>
-    <input type="hidden" id="mode" value="video">
-    <button class="btn-start" id="start" onclick="startJob()">⬇ ابدأ التحميل</button>
-    <div class="status" id="status">
-      <div id="statusText">جاري التجهيز...</div>
-      <div class="bar"><div class="fill" id="fill"></div></div>
-      <div id="percent" style="font-size: 12px; color: var(--muted);">0%</div>
-    </div>
-  </section>
-  <footer>VIDORA • تطبيق الهاتف</footer>
-</div>
-<script>
-const API_BASE = 'http://127.0.0.1:8080';
-let currentJob = null, pollTimer = null;
-const $ = id => document.getElementById(id);
+package com.vidora.app
 
-function selectMode(m) {
-  $('mode').value = m;
-  $('btnVideo').classList.toggle('active', m === 'video');
-  $('btnAudio').classList.toggle('active', m === 'audio');
-}
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.DownloadManager
+import android.content.Context
+import android.net.Uri
+import android.os.Bundle
+import android.os.Environment
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.Toast
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 
-function showError(msg) {
-  $('status').style.display = 'block';
-  $('statusText').className = 'error';
-  $('statusText').textContent = msg;
-}
+class MainActivity : Activity() {
 
-async function startJob() {
-  const url = $('url').value.trim(), mode = $('mode').value;
-  if (!url) { alert('يرجى لصق الرابط أولاً'); return; }
-  $('start').disabled = true;
-  $('status').style.display = 'block';
-  $('statusText').className = '';
-  $('statusText').textContent = 'جاري الاتصال...';
-  $('fill').style.width = '0%';
-  $('percent').textContent = '0%';
+    private lateinit var webView: WebView
 
-  try {
-    const res = await fetch(API_BASE + '/api/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, mode, quality: 'best' })
-    });
-    const d = await res.json();
-    if (!d.success) throw new Error(d.message || 'تعذر بدء العملية');
-    currentJob = d.job_id;
-    poll();
-  } catch(e) {
-    showError('تأكد من تشغيل خادم Vidora في Pydroid أولاً.');
-    $('start').disabled = false;
-  }
-}
+    @SuppressLint("SetJavaScriptEnabled")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
-async function poll() {
-  if (!currentJob) return;
-  try {
-    const res = await fetch(API_BASE + '/api/status?id=' + encodeURIComponent(currentJob));
-    const d = await res.json();
-    $('statusText').className = d.state === 'error' ? 'error' : (d.state === 'done' ? 'success' : '');
-    $('statusText').textContent = d.message || 'جاري العمل...';
-    const p = Math.max(0, Math.min(100, Number(d.progress) || 0));
-    $('fill').style.width = p + '%';
-    $('percent').textContent = p.toFixed(1) + '%';
+        webView = WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.allowFileAccess = true
+            webViewClient = WebViewClient()
+            addJavascriptInterface(WebAppInterface(this@MainActivity), "AndroidApp")
+            loadUrl("file:///android_asset/index.html")
+        }
 
-    if (d.state === 'done') {
-      $('url').value = '';
-      window.location.href = API_BASE + '/api/file?id=' + encodeURIComponent(currentJob);
-      $('start').disabled = false;
-      currentJob = null;
-      return;
+        setContentView(webView)
     }
-    if (d.state === 'error') {
-      $('start').disabled = false;
-      currentJob = null;
-      return;
+
+    inner class WebAppInterface(private val context: Context) {
+
+        @JavascriptInterface
+        fun startDownload(rawUrl: String, mode: String) {
+            var url = rawUrl.trim()
+            // معالجة أي شرطة زائدة في بداية الرابط
+            if (url.startsWith("/")) {
+                url = url.substring(1).trim()
+            }
+            if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                url = "https://$url"
+            }
+
+            runOnUiThread {
+                updateStatus("جاري فك الرابط والاتصال بالمحتوى...", 25, false)
+            }
+
+            Thread {
+                try {
+                    val result = resolveDownloadUrl(url, mode)
+                    if (result != null) {
+                        runOnUiThread {
+                            updateStatus("تم تجهيز الرابط! جاري الحفظ في التنزيلات...", 80, false)
+                        }
+                        val ext = if (mode == "audio") "mp3" else "mp4"
+                        val cleanTitle = result.title.replace(Regex("[^a-zA-Z0-9أ-ي_\\-]"), "_").take(40)
+                        val filename = "Vidora_${cleanTitle}_${System.currentTimeMillis()}.$ext"
+
+                        downloadFileWithManager(result.downloadUrl, filename, result.title)
+
+                        runOnUiThread {
+                            updateStatus("تم بدء التنزيل بنجاح في مجلد Downloads/Vidora!", 100, true)
+                            Toast.makeText(context, "بدأ التنزيل في الإشعارات ومجلد Download", Toast.LENGTH_LONG).show()
+                        }
+                    } else {
+                        runOnUiThread {
+                            updateStatus("تعذر استخراج الفيديو، تأكد من صحة الرابط وأنه عام.", 0, false, isError = true)
+                        }
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        updateStatus("خطأ: ${e.localizedMessage ?: "فشل الاتصال بالشبكة"}", 0, false, isError = true)
+                    }
+                }
+            }.start()
+        }
     }
-  } catch(e) {
-    $('statusText').textContent = 'انقطع الاتصال بالسيرفر';
-  }
-  pollTimer = setTimeout(poll, 1000);
+
+    data class MediaResult(val downloadUrl: String, val title: String)
+
+    private fun resolveDownloadUrl(targetUrl: String, mode: String): MediaResult? {
+        // 1. محرك مخصص لروابط تيك توك (TikTok)
+        if (targetUrl.contains("tiktok.com", ignoreCase = true)) {
+            val endpoint = "https://www.tikwm.com/api/?url=" + URLEncoder.encode(targetUrl, "UTF-8")
+            val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 15000
+                readTimeout = 15000
+                setRequestProperty("User-Agent", "Mozilla/5.0")
+            }
+            if (conn.responseCode == 200) {
+                val response = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(response)
+                if (json.optInt("code", -1) == 0) {
+                    val data = json.getJSONObject("data")
+                    val title = data.optString("title", "tiktok_video")
+                    val dlUrl = if (mode == "audio") data.optString("music", "") else data.optString("play", "")
+                    if (dlUrl.isNotEmpty()) return MediaResult(dlUrl, title)
+                }
+            }
+        }
+
+        // 2. محرك عام لمنصات الفيديو الأخرى
+        val fallbackApi = "https://api.vkrdownloader.com/server?vkr=" + URLEncoder.encode(targetUrl, "UTF-8")
+        try {
+            val conn = (URL(fallbackApi).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 15000
+                readTimeout = 15000
+                setRequestProperty("User-Agent", "Mozilla/5.0")
+            }
+            if (conn.responseCode == 200) {
+                val response = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(response)
+                val data = json.optJSONObject("data")
+                if (data != null) {
+                    val title = data.optString("title", "video")
+                    val downloads = data.optJSONArray("downloads")
+                    if (downloads != null && downloads.length() > 0) {
+                        for (i in 0 until downloads.length()) {
+                            val item = downloads.getJSONObject(i)
+                            val format = item.optString("format_id", "")
+                            val url = item.optString("url", "")
+                            if (mode == "audio" && (format.contains("audio") || format.contains("mp3"))) {
+                                return MediaResult(url, title)
+                            }
+                            if (mode == "video" && url.isNotEmpty()) {
+                                return MediaResult(url, title)
+                            }
+                        }
+                        val firstUrl = downloads.getJSONObject(0).optString("url", "")
+                        if (firstUrl.isNotEmpty()) return MediaResult(firstUrl, title)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        return null
+    }
+
+    private fun downloadFileWithManager(fileUrl: String, filename: String, title: String) {
+        val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val request = DownloadManager.Request(Uri.parse(fileUrl)).apply {
+            setTitle("Vidora: $title")
+            setDescription("جاري تنزيل الملف...")
+            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Vidora/$filename")
+            setAllowedOverMetered(true)
+            setAllowedOverRoaming(true)
+        }
+        downloadManager.enqueue(request)
+    }
+
+    private fun updateStatus(msg: String, progress: Int, isDone: Boolean, isError: Boolean = false) {
+        val escaped = JSONObject.quote(msg)
+        webView.evaluateJavascript("handleNativeStatus($escaped, $progress, $isDone, $isError);", null)
+    }
 }
-</script>
-</body>
-</html>

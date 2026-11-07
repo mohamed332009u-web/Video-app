@@ -12,6 +12,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -19,6 +21,8 @@ import java.net.URLEncoder
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
+
+    data class MediaResult(val downloadUrl: String, val title: String)
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,11 +40,13 @@ class MainActivity : Activity() {
         setContentView(webView)
     }
 
+    // واجهة التفاعل بين JavaScript والكود البرمجي (Kotlin)
     inner class WebAppInterface(private val context: Context) {
 
         @JavascriptInterface
         fun startDownload(rawUrl: String, mode: String) {
             var url = rawUrl.trim()
+
             // معالجة أي شرطة زائدة في بداية الرابط
             if (url.startsWith("/")) {
                 url = url.substring(1).trim()
@@ -56,12 +62,14 @@ class MainActivity : Activity() {
             Thread {
                 try {
                     val result = resolveDownloadUrl(url, mode)
+
                     if (result != null) {
                         runOnUiThread {
                             updateStatus("تم تجهيز الرابط! جاري الحفظ في التنزيلات...", 80, false)
                         }
+
                         val ext = if (mode == "audio") "mp3" else "mp4"
-                        val cleanTitle = result.title.replace(Regex("[^a-zA-Z0-9أ-ي_\\-]"), "_").take(40)
+                        val cleanTitle = result.title.replace(Regex("[^a-zA-Z0-9_\\-\\s]"), "_").take(40)
                         val filename = "Vidora_${cleanTitle}_${System.currentTimeMillis()}.$ext"
 
                         downloadFileWithManager(result.downloadUrl, filename, result.title)
@@ -77,15 +85,19 @@ class MainActivity : Activity() {
                     }
                 } catch (e: Exception) {
                     runOnUiThread {
-                        updateStatus("خطأ: ${e.localizedMessage ?: "فشل الاتصال بالشبكة"}", 0, false, isError = true)
+                        updateStatus(
+                            "خطأ: ${e.localizedMessage ?: "فشل الاتصال بالشبكة"}",
+                            0,
+                            false,
+                            isError = true
+                        )
                     }
                 }
             }.start()
         }
     }
 
-    data class MediaResult(val downloadUrl: String, val title: String)
-
+    // دالة استخراج روابط التحميل من الخدمات المختلفة
     private fun resolveDownloadUrl(targetUrl: String, mode: String): MediaResult? {
         // 1. محرك مخصص لروابط تيك توك (TikTok)
         if (targetUrl.contains("tiktok.com", ignoreCase = true)) {
@@ -96,71 +108,53 @@ class MainActivity : Activity() {
                 readTimeout = 15000
                 setRequestProperty("User-Agent", "Mozilla/5.0")
             }
-            if (conn.responseCode == 200) {
-                val response = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(response)
-                if (json.optInt("code", -1) == 0) {
+
+            val responseCode = conn.responseCode
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                val responseText = reader.use { it.readText() }
+                val json = JSONObject(responseText)
+
+                if (json.optInt("code") == 0) {
                     val data = json.getJSONObject("data")
                     val title = data.optString("title", "tiktok_video")
-                    val dlUrl = if (mode == "audio") data.optString("music", "") else data.optString("play", "")
-                    if (dlUrl.isNotEmpty()) return MediaResult(dlUrl, title)
+
+                    val downloadUrl = if (mode == "audio") {
+                        data.optString("music", "")
+                    } else {
+                        // الرابط المباشر للفيديو بدون علامة مائية
+                        data.optString("play", "")
+                    }
+
+                    if (downloadUrl.isNotEmpty()) {
+                        return MediaResult(downloadUrl, title)
+                    }
                 }
             }
         }
 
-        // 2. محرك عام لمنصات الفيديو الأخرى
-        val fallbackApi = "https://api.vkrdownloader.com/server?vkr=" + URLEncoder.encode(targetUrl, "UTF-8")
-        try {
-            val conn = (URL(fallbackApi).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 15000
-                readTimeout = 15000
-                setRequestProperty("User-Agent", "Mozilla/5.0")
-            }
-            if (conn.responseCode == 200) {
-                val response = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(response)
-                val data = json.optJSONObject("data")
-                if (data != null) {
-                    val title = data.optString("title", "video")
-                    val downloads = data.optJSONArray("downloads")
-                    if (downloads != null && downloads.length() > 0) {
-                        for (i in 0 until downloads.length()) {
-                            val item = downloads.getJSONObject(i)
-                            val format = item.optString("format_id", "")
-                            val url = item.optString("url", "")
-                            if (mode == "audio" && (format.contains("audio") || format.contains("mp3"))) {
-                                return MediaResult(url, title)
-                            }
-                            if (mode == "video" && url.isNotEmpty()) {
-                                return MediaResult(url, title)
-                            }
-                        }
-                        val firstUrl = downloads.getJSONObject(0).optString("url", "")
-                        if (firstUrl.isNotEmpty()) return MediaResult(firstUrl, title)
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-
+        // في حال لم يكن تيك توك أو فشل الاستخراج
         return null
     }
 
-    private fun downloadFileWithManager(fileUrl: String, filename: String, title: String) {
-        val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val request = DownloadManager.Request(Uri.parse(fileUrl)).apply {
-            setTitle("Vidora: $title")
-            setDescription("جاري تنزيل الملف...")
+    // دالة بدء التنزيل باستخدام DownloadManager في أندرويد
+    private fun downloadFileWithManager(downloadUrl: String, filename: String, title: String) {
+        val request = DownloadManager.Request(Uri.parse(downloadUrl)).apply {
+            setTitle(title)
+            setDescription("جاري تنزيل الملف عبر Vidora...")
             setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "Vidora/$filename")
             setAllowedOverMetered(true)
             setAllowedOverRoaming(true)
         }
-        downloadManager.enqueue(request)
+
+        val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        manager.enqueue(request)
     }
 
-    private fun updateStatus(msg: String, progress: Int, isDone: Boolean, isError: Boolean = false) {
-        val escaped = JSONObject.quote(msg)
-        webView.evaluateJavascript("handleNativeStatus($escaped, $progress, $isDone, $isError);", null)
+    // دالة إرسال التحديثات لصفحة الويب (JavaScript)
+    private fun updateStatus(message: String, progress: Int, isDone: Boolean, isError: Boolean = false) {
+        val jsCommand = "javascript:if(typeof updateDownloadStatus === 'function') { updateDownloadStatus('$message', $progress, $isDone, $isError); }"
+        webView.evaluateJavascript(jsCommand, null)
     }
 }
